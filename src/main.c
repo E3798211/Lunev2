@@ -1,28 +1,15 @@
 
+#include <fcntl.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <errno.h>
 #include <pthread.h>
+#include "service.h"
 
-static int get_positive(char const* str, size_t* val)
-{
-    char* endptr = NULL;
-    errno = 0;
-    long long value = strtol(str, &endptr, 10);
-    if(errno == ERANGE || *endptr|| value < 1)
-        return EXIT_FAILURE;
-    *val = value;
-    return EXIT_SUCCESS;
-}
+static void* routine(void* arg);
 
-static void* routine(void* arg)
-{
-    *((int*)arg) = 5;
-    return arg;
-}
-
-
+#define CACHE_LINE "/sys/devices/system/cpu/cpu0/cache/index0/coherency_line_size"
 #define N 10
 
 int main(int argc, char** argv)
@@ -40,8 +27,13 @@ int main(int argc, char** argv)
         return EXIT_FAILURE;
     }
 
+    // Getting info about system
+    // Cache line
+    size_t cache_line_len;
+    if (read_number(CACHE_LINE, "%lu", &cache_line_len))
+        return EXIT_FAILURE;
 
-
+    printf("%lu\n", cache_line_len);
 
 
 
@@ -69,4 +61,8 @@ int main(int argc, char** argv)
 
     return 0;
 }
+
+
+
+
 
