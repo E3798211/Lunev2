@@ -7,9 +7,15 @@
 #include <pthread.h>
 #include "service.h"
 
+#ifdef DEBUG
+    #define DBG
+#else
+    #define DBG if(0)
+#endif
+
 static void* routine(void* arg);
 
-#define CACHE_LINE "/sys/devices/system/cpu/cpu0/cache/index0/coherency_line_size"
+#define CACHE_LINE "/sys/bus/cpu/devices/cpu0/cache/index0/coherency_line_size"
 #define N 10
 
 int main(int argc, char** argv)
@@ -27,13 +33,10 @@ int main(int argc, char** argv)
         return EXIT_FAILURE;
     }
 
-    // Getting info about system
-    // Cache line
     size_t cache_line_len;
     if (read_number(CACHE_LINE, "%lu", &cache_line_len))
         return EXIT_FAILURE;
-
-    printf("%lu\n", cache_line_len);
+    DBG printf("cache line length = %4lu\n", cache_line_len);
 
 
 

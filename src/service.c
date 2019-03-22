@@ -16,33 +16,25 @@ int read_number(const char* const filename, const char* const fmt,
                 void* const value)
 {
     errno = 0;
-    if (access(filename, F_OK))
+    FILE* fin = fopen(filename, "r");
+    if (!fin)
     {
-        perror("access()");
+        perror("fopen()");
         return EXIT_FAILURE;
     }
 
     errno = 0;
-    int fd = open(filename, O_RDONLY);
-    if (fd < 0)
-    {
-        perror("open()");
-        return EXIT_FAILURE;
-    }
+    fscanf(fin, fmt, value);
+    int status = errno;
     
-    char buffer[BUF_LEN];
-    errno = 0;
-    int len = read(fd, buffer, BUF_LEN);
-    if (len < 0)
-    {
-        perror("read()");
-        return EXIT_FAILURE;
-    }
-
-    buffer[len] = '\0';
-    sscanf(buffer, fmt, value);
-
-    return EXIT_SUCCESS;
+    fclose(fin);
+    return ((status)? EXIT_FAILURE : EXIT_SUCCESS);
 }
+
+
+
+
+
+
 
 
