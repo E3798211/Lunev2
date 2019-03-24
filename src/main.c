@@ -18,6 +18,13 @@ static void* routine(void* arg);
 #define CACHE_LINE "/sys/bus/cpu/devices/cpu0/cache/index0/coherency_line_size"
 #define N 10
 
+struct proc_t 
+{
+    int online;
+    int package_id;
+    int phys_id;
+};
+
 int main(int argc, char** argv)
 {
     if (argc != 2)
@@ -36,10 +43,18 @@ int main(int argc, char** argv)
     size_t cache_line_len;
     if (read_number(CACHE_LINE, "%lu", &cache_line_len))
         return EXIT_FAILURE;
-    DBG printf("cache line length = %4lu\n", cache_line_len);
+    DBG printf("cache line length:\t%4lu\n", cache_line_len);
+    
+    errno = 0;
+    int n_proc_conf = sysconf(_SC_NPROCESSORS_CONF);
+    if (n_proc_conf < 0)
+    {
+        perror("sysconf(_SC_NPROCESSORS_CONF)");
+        return EXIT_FAILURE;
+    }
+    DBG printf("configured processors:\t%4d\n", n_proc_conf);
 
-
-
+    
 /*
     pthread_t tids[N];
     int buf[N];
