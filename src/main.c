@@ -15,23 +15,23 @@
 #endif
 
 static void* routine(void* arg);
-
-#define CACHE_LINE   "/sys/bus/cpu/devices/cpu0/cache/index0/coherency_line_size"
-#define CPU_FILENAME_MAX_LEN 100    // Assuming pathname of next files this long
-#define CPU_FILE_ONLINE   "/sys/bus/cpu/devices/cpu%d/online"
-#define CPU_FILE_PACKAGE  "/sys/bus/cpu/devices/cpu%d/topology/physical_package_id"
-#define CPU_FILE_PHYS_ID  "/sys/bus/cpu/devices/cpu%d/topology/core_id"
-
 #define N 10
+
+#define CACHE_LINE      "/sys/bus/cpu/devices/cpu0/cache/index0/coherency_line_size"
+
+#define CPU_FILENAME_MAX_LEN 100    // Assuming pathname of next files this long
+#define CPU_FILE_ONLINE     "/sys/bus/cpu/devices/cpu%d/online"
+#define CPU_FILE_PACKAGE    "/sys/bus/cpu/devices/cpu%d/topology/physical_package_id"
+#define CPU_FILE_PHYS_ID    "/sys/bus/cpu/devices/cpu%d/topology/core_id"
 
 struct cpu_t 
 {
     int online;
     int package_id;
-    int phys_id;
+    int core_id;
 };
 
-int get_topology(struct cpu_t* cpus, int n_proc_conf);
+static int get_topology(struct cpu_t* cpus, int n_proc_conf);
 
 int main(int argc, char** argv)
 {
@@ -66,8 +66,12 @@ int main(int argc, char** argv)
     DBG printf("configured processors:\t%4d\n", n_proc_conf);
 
     struct cpu_t cpus[n_proc_conf];
-    get_topology(cpus, n_proc_conf);
-    
+    if (get_topology(cpus, n_proc_conf))
+    {
+        printf("Failed to get topology\n");
+        return EXIT_FAILURE;
+    }
+
 /*
     pthread_t tids[N];
     int buf[N];
@@ -94,58 +98,50 @@ int main(int argc, char** argv)
 }
 
 
-int get_topology(struct cpu_t* cpus, int n_proc_conf)
+static int get_cpu_attribute(const char* const file_template, int core_num, 
+                             int* attr)
+{
+    char pathname[CPU_FILENAME_MAX_LEN];
+    
+    snprintf(pathname, CPU_FILENAME_MAX_LEN, file_template, core_num);
+    pathname[CPU_FILENAME_MAX_LEN - 1] = '\0';
+    DBG printf("reading '%s':\n", pathname);
+
+    if (read_number(pathname, "%d", attr)) 
+    {
+        printf("Failed reading '%s'\n", pathname);
+        return EXIT_FAILURE;
+    }
+
+    return EXIT_SUCCESS;
+}
+
+static int get_topology(struct cpu_t* cpus, int n_proc_conf)
 {
     assert(cpus);
     assert(n_proc_conf > 0);
 
     for(int i = 0; i < n_proc_conf; i++)
     {
-        char pathname[CPU_FILENAME_MAX_LEN];
-
-        // Online
-        snprintf(pathname, CPU_FILENAME_MAX_LEN, CPU_FILE_ONLINE, i);
-        pathname[CPU_FILENAME_MAX_LEN - 1] = '\0';
-        DBG printf("reading '%s':\n", pathname);
-
-        // CPU0 is always online, this file does not exist
+        // CPU0 is always online
         if (i != 0)
         {
-            if (read_number(pathname, "%d", &cpus[i].online))
-            {
-                printf("Failed reading '%s'\n", pathname);
+            if (get_cpu_attribute(CPU_FILE_ONLINE, i, &cpus[i].online))
                 return EXIT_FAILURE;
-            }
         }
         else
             cpus[i].online = 1;
-        DBG printf("CPU%d: online     = %d\n", i, cpus[i].online);
+        DBG printf("CPU%d: online     = %d\n",   i, cpus[i].online);
 
-        // Physical ID 
-        snprintf(pathname, CPU_FILENAME_MAX_LEN, CPU_FILE_PHYS_ID, i);
-        pathname[CPU_FILENAME_MAX_LEN - 1] = '\0';
-        DBG printf("reading '%s':\n", pathname);
-
-        if (read_number(pathname, "%d", &cpus[i].phys_id))
-        {
-            printf("Failed reading '%s'\n", pathname);
+        if (get_cpu_attribute(CPU_FILE_PHYS_ID,  i, &cpus[i].core_id))
             return EXIT_FAILURE;
-        }
-        DBG printf("CPU%d: phys_id    = %d\n", i, cpus[i].phys_id);
+        DBG printf("CPU%d: core_id    = %d\n",   i, cpus[i].core_id);
 
-
-        // Package ID 
-        snprintf(pathname, CPU_FILENAME_MAX_LEN, CPU_FILE_PACKAGE, i);
-        pathname[CPU_FILENAME_MAX_LEN - 1] = '\0';
-        DBG printf("reading '%s':\n", pathname);
-
-        if (read_number(pathname, "%d", &cpus[i].package_id))
-        {
-            printf("Failed reading '%s'\n", pathname);
+        if (get_cpu_attribute(CPU_FILE_PACKAGE,  i, &cpus[i].package_id))
             return EXIT_FAILURE;
-        }
-        DBG printf("CPU%d: package id = %d\n\n", i, cpus[i].package_id);
+        DBG printf("CPU%d: package id = %d\n\n", i, cpus[i].package_id);    
     }
+    return EXIT_SUCCESS;
 }
 
 
