@@ -24,14 +24,14 @@ static void* routine(void* arg);
 
 #define N 10
 
-struct proc_t 
+struct cpu_t 
 {
     int online;
     int package_id;
     int phys_id;
 };
 
-int get_topology(struct proc_t* cpus, int n_proc_conf);
+int get_topology(struct cpu_t* cpus, int n_proc_conf);
 
 int main(int argc, char** argv)
 {
@@ -65,7 +65,7 @@ int main(int argc, char** argv)
     }
     DBG printf("configured processors:\t%4d\n", n_proc_conf);
 
-    struct proc_t cpus[n_proc_conf];
+    struct cpu_t cpus[n_proc_conf];
     get_topology(cpus, n_proc_conf);
     
 /*
@@ -94,7 +94,7 @@ int main(int argc, char** argv)
 }
 
 
-int get_topology(struct proc_t* cpus, int n_proc_conf)
+int get_topology(struct cpu_t* cpus, int n_proc_conf)
 {
     assert(cpus);
     assert(n_proc_conf > 0);
