@@ -12,8 +12,8 @@ int get_positive(char const* str, size_t* val)
     return EXIT_SUCCESS;
 }
 
-int read_number(const char* const filename, const char* const fmt,
-                void* const value)
+int read_value(const char* const filename, const char* const fmt,
+               void* const value)
 {
     errno = 0;
     FILE* fin = fopen(filename, "r");

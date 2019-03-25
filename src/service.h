@@ -11,8 +11,8 @@
 #define BUF_LEN 100
 
 int get_positive(char const* str, size_t* val);
-int read_number(const char* const filename, const char* const fmt,
-                void* const value);
+int read_value(const char* const filename, const char* const fmt,
+               void* const value);
 
 #endif // SERVICE_H_INCLUDED
 

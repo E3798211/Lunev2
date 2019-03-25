@@ -49,7 +49,7 @@ int main(int argc, char** argv)
     }
 
     size_t cache_line_len;
-    if (read_number(CACHE_LINE, "%lu", &cache_line_len))
+    if (read_value(CACHE_LINE, "%lu", &cache_line_len))
     {
         printf("Failed reading '%s'\n", CACHE_LINE);
         return EXIT_FAILURE;
@@ -63,7 +63,7 @@ int main(int argc, char** argv)
         perror("sysconf(_SC_NPROCESSORS_CONF)");
         return EXIT_FAILURE;
     }
-    DBG printf("configured processors:\t%4d\n", n_proc_conf);
+    DBG printf("configured processors:\t%4d\n\n", n_proc_conf);
 
     struct cpu_t cpus[n_proc_conf];
     if (get_topology(cpus, n_proc_conf))
@@ -107,7 +107,7 @@ static int get_cpu_attribute(const char* const file_template, int core_num,
     pathname[CPU_FILENAME_MAX_LEN - 1] = '\0';
     DBG printf("reading '%s':\n", pathname);
 
-    if (read_number(pathname, "%d", attr)) 
+    if (read_value(pathname, "%d", attr)) 
     {
         printf("Failed reading '%s'\n", pathname);
         return EXIT_FAILURE;
