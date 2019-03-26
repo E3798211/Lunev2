@@ -31,7 +31,21 @@ struct cpu_t
     int core_id;
 };
 
+struct sysconfig_t
+{
+    size_t cache_line;
+    int    n_proc_conf;
+    struct cpu_t* cpus;
+};
+
 static int get_topology(struct cpu_t* cpus, int n_proc_conf);
+
+/*
+    Allocates memory for cpus arg. Must be freed before exit (only when
+    function returns EXIT_SUCCESS).
+ */
+static int get_system_config(struct sysconfig_t* const sys,
+                             struct cpu_t** const cpus);
 
 int main(int argc, char** argv)
 {
@@ -48,30 +62,14 @@ int main(int argc, char** argv)
         return EXIT_FAILURE;
     }
 
-    size_t cache_line_len;
-    if (read_value(CACHE_LINE, "%lu", &cache_line_len))
+    struct sysconfig_t sys;
+    struct cpu_t* cpus;
+    if (get_system_config(&sys, &cpus))
     {
-        printf("Failed reading '%s'\n", CACHE_LINE);
+        printf("get_system_config() failed\n");
         return EXIT_FAILURE;
     }
-    DBG printf("cache line length:\t%4lu\n", cache_line_len);
     
-    errno = 0;
-    int n_proc_conf = sysconf(_SC_NPROCESSORS_CONF);
-    if (n_proc_conf < 0)
-    {
-        perror("sysconf(_SC_NPROCESSORS_CONF)");
-        return EXIT_FAILURE;
-    }
-    DBG printf("configured processors:\t%4d\n\n", n_proc_conf);
-
-    struct cpu_t cpus[n_proc_conf];
-    if (get_topology(cpus, n_proc_conf))
-    {
-        printf("Failed to get topology\n");
-        return EXIT_FAILURE;
-    }
-
 /*
     pthread_t tids[N];
     int buf[N];
@@ -144,7 +142,46 @@ static int get_topology(struct cpu_t* cpus, int n_proc_conf)
     return EXIT_SUCCESS;
 }
 
+static int get_system_config(struct sysconfig_t* const sys,
+                             struct cpu_t** const cpus)
+{
+    assert(sys);
+    assert(cpus);
 
+    if (read_value(CACHE_LINE, "%lu", &sys->cache_line))
+    {
+        printf("Failed reading '%s'\n", CACHE_LINE);
+        return EXIT_FAILURE;
+    }
+    DBG printf("cache line length:\t%4lu\n", sys->cache_line);
+    
+    errno = 0;
+    sys->n_proc_conf = sysconf(_SC_NPROCESSORS_CONF);
+    if (sys->n_proc_conf < 0)
+    {
+        perror("sysconf(_SC_NPROCESSORS_CONF)");
+        return EXIT_FAILURE;
+    }
+    DBG printf("configured processors:\t%4d\n\n", sys->n_proc_conf);
+
+    *cpus = (struct cpu_t*)calloc(sys->n_proc_conf, sizeof(struct cpu_t));
+    if (!*cpus)
+    {
+        printf("calloc() failed\n");
+        return EXIT_FAILURE;
+    }
+
+    if (get_topology(*cpus, sys->n_proc_conf))
+    {
+        printf("Failed to get topology\n");
+        free(*cpus);
+        return EXIT_FAILURE;
+    }
+
+
+
+    return EXIT_SUCCESS;
+}
 
 
 
