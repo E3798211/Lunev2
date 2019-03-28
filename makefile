@@ -1,7 +1,7 @@
 # Compile settings
 CC=gcc
-CFLAGS=-Wall -pthread
-LFLAGS=-pthread
+CFLAGS=-Wall -pthread -lm
+LFLAGS=-pthread -lm
 
 # Sources
 SRC:=src
@@ -26,7 +26,7 @@ all: directories debug
 debug release: $(HEADERS)
 
 debug release: $(OBJECTS)
-	$(CC) $(LFLAGS) -o $(BINARY) $^
+	$(CC) -o $(BINARY) $^ $(LFLAGS)
 
 $(OBJ)/%.o: $(SRC)/%.c
 	$(CC) $(CFLAGS) -c $^ -o $@

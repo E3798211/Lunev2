@@ -1,4 +1,7 @@
 
+#define _GNU_SOURCE
+
+#include <sched.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -6,6 +9,7 @@
 #include <errno.h>
 #include <pthread.h>
 #include <assert.h>
+#include <math.h>
 #include "service.h"
 
 #ifdef DEBUG
@@ -14,8 +18,27 @@
     #define DBG if(0)
 #endif
 
-static void* routine(void* arg);
-#define N 10
+
+#define f(x) exp(-(x)*(x))
+#define LEFT_BOUND  0.0
+#define RIGHT_BOUND 10.0
+#define INTEGRAL_STEP 0.01
+
+struct arg_t
+{
+    double left;
+    double right;
+    double sum;
+    double fill[5];
+};
+
+static void* routine(void* arg)
+{
+    struct arg_t* bounds = (struct arg_t*)arg;
+    for(double x = bounds->left; x < bounds->right; x += INTEGRAL_STEP)
+        bounds->sum += f(x)*INTEGRAL_STEP;
+    return bounds;
+}
 
 #define CACHE_LINE      "/sys/bus/cpu/devices/cpu0/cache/index0/coherency_line_size"
 
@@ -26,6 +49,7 @@ static void* routine(void* arg);
 
 struct cpu_t 
 {
+    int number;
     int online;
     int package_id;
     int core_id;
@@ -36,6 +60,7 @@ struct sysconfig_t
 {
     size_t cache_line;
     int    n_proc_conf;
+    int    n_proc_onln;
     struct cpu_t* cpus;
 };
 
@@ -49,6 +74,10 @@ static int get_system_config(struct sysconfig_t* const sys);
 static void delete_config(struct sysconfig_t* sys);
 static void sort_cpus(struct sysconfig_t* const sys, struct cpu_t* cpus);
 static int is_used(int cores[], size_t n_cores, int test_core);
+static int start_threads(struct sysconfig_t* sys, size_t n_threads, 
+                         pthread_t tids[], struct arg_t args[]);
+static int join_threads (struct sysconfig_t* sys, size_t n_threads, 
+                         pthread_t tids[], struct arg_t args[], double* sum);
 
 int main(int argc, char** argv)
 {
@@ -58,7 +87,7 @@ int main(int argc, char** argv)
         return EXIT_FAILURE;
     }
     
-    size_t n_threads;
+    size_t n_threads = 0;
     if (get_positive(argv[1], &n_threads))
     {
         printf("Invalid input\n");
@@ -71,34 +100,37 @@ int main(int argc, char** argv)
         printf("get_system_config() failed\n");
         return EXIT_FAILURE;
     }
+   
+    errno = 0;
+    struct arg_t* thread_args = 
+        aligned_alloc(sys.cache_line, sys.cache_line * n_threads);
+    if (!thread_args)
+    {
+        perror("posix_memalign()");
+        return EXIT_FAILURE;
+    }
+    DBG printf("Allocated %lu bytes each %lu bytes aligned to %p\n\n",
+               sys.cache_line*n_threads, sizeof(struct arg_t), thread_args);
+    pthread_t tids[n_threads];
+
+    // Strating threads
+    DBG printf("Starting threads\n");
+    if (start_threads(&sys, n_threads, tids, thread_args))
+    {
+        printf("start_threads() failed\n");
+        return EXIT_FAILURE;
+    }
     
-
-    for(int i = 0; i < sys.n_proc_conf; i++)
+    DBG printf("Joining threads\n");
+    double sum = 0;
+    if (join_threads(&sys, n_threads, tids, thread_args, &sum))
     {
-        printf("core: %d: %s\n", sys.cpus[i].core_id, (sys.cpus[i].online? "online":"offline"));
+        printf("join_threads() failed\n");
+        return EXIT_FAILURE;
     }
 
-/*
-    pthread_t tids[N];
-    int buf[N];
 
-    for(size_t i = 0; i < N; i++)
-    {
-        if (pthread_create(&tids[i], NULL, routine, &buf[i]))
-            printf("Failed to create thread\n");
-    }
-
-    for(size_t i = 0; i < N; i++)
-    {
-        if (pthread_join(tids[i], NULL))
-            printf("Failed to join thread\n");
-    }
-
-    for(size_t i = 0; i < N; i++)
-        printf("%4lu = %4d\n", i, buf[i]);
-
-    return 0;
-*/
+    // printf("%lg\n", sum);
 
     delete_config(&sys);
 
@@ -131,6 +163,9 @@ static int get_topology(struct cpu_t* cpus, int n_proc_conf)
 
     for(int i = 0; i < n_proc_conf; i++)
     {
+        cpus[i].number = i;
+        DBG printf("CPU%d: number     = %d\n",   i, cpus[i].number);
+
         // CPU0 is always online
         if (i != 0)
         {
@@ -146,12 +181,7 @@ static int get_topology(struct cpu_t* cpus, int n_proc_conf)
         {
             cpus[i].core_id    = -1;
             cpus[i].package_id = -1;
-            cpus[i].location = (cpus[i].package_id << (sizeof(int)/2)) | cpus[i].core_id;
-            
-            DBG printf("CPU%d: core_id    = %d\n",   i, cpus[i].core_id);
-            DBG printf("CPU%d: package id = %d\n",   i, cpus[i].package_id); 
-            DBG printf("CPU%d: location   = %d\n\n", i, cpus[i].location);
-            
+            cpus[i].location = (cpus[i].package_id << (sizeof(int)/2)) | cpus[i].core_id; 
             continue;
         }
 
@@ -187,7 +217,16 @@ static int get_system_config(struct sysconfig_t* const sys)
         perror("sysconf(_SC_NPROCESSORS_CONF)");
         return EXIT_FAILURE;
     }
-    DBG printf("configured processors:\t%4d\n\n", sys->n_proc_conf);
+    DBG printf("configured processors:\t%4d\n", sys->n_proc_conf);
+
+    errno = 0;
+    sys->n_proc_onln = sysconf(_SC_NPROCESSORS_ONLN);
+    if (sys->n_proc_onln < 0)
+    {
+        perror("sysconf(_SC_NPROCESSORS_ONLN)");
+        return EXIT_FAILURE;
+    }
+    DBG printf("online processors:\t%4d\n\n", sys->n_proc_onln);
 
     struct cpu_t cpus[sys->n_proc_conf];
     if (get_topology(cpus, sys->n_proc_conf))
@@ -258,7 +297,67 @@ static int is_used(int cores[], size_t n_cores, int test_core)
     return 0;
 }
 
+static int start_threads(struct sysconfig_t* sys, size_t n_threads, 
+                         pthread_t tids[], struct arg_t args[])
+{
+    const double step = (RIGHT_BOUND - LEFT_BOUND) / n_threads;
 
+    // if (n_threads == 1)
+    // 
+
+    // if (n_threads <= cores_online)
+    for(size_t i = 0; i < n_threads; i++)
+    {
+        cpu_set_t cpuset;
+        CPU_ZERO(&cpuset);
+        CPU_SET(sys->cpus[i].number, &cpuset);
+
+        args[i].left  = LEFT_BOUND + step * i;
+        args[i].right = LEFT_BOUND + step * (i + 1);
+
+        errno = 0;
+        if (pthread_create(&tids[i], NULL, routine, &args[i]))
+        {
+            perror("pthread_create()");
+            printf("Failed to create %lu'th thread\n", i);
+            return EXIT_FAILURE;
+        }
+        DBG printf("Created thread %lu\n", tids[i]);
+
+        errno = 0;
+        if (pthread_setaffinity_np(tids[i], sizeof(cpu_set_t), &cpuset))
+        {
+            perror("pthread_setaffinity_np()");
+            printf("Failed to move %lu'th thread to %d'th core\n", i, 
+                   sys->cpus[i].number);
+            return EXIT_FAILURE;
+        }
+    }
+
+    return EXIT_SUCCESS;
+
+    // else
+    //
+}
+
+static int join_threads (struct sysconfig_t* sys, size_t n_threads, 
+                         pthread_t tids[], struct arg_t args[], double* sum)
+{
+    *sum = 0;
+    for(size_t i = 0; i < n_threads; i++)
+    {
+        errno = 0;
+        DBG printf("Joining %lu'th tread\n", i);
+        if (pthread_join(tids[i], NULL))
+        {
+            perror("pthread_join()");
+            printf("Failed to join %lu'th thread\n", i);
+            return EXIT_FAILURE;
+        }
+        *sum += args[i].sum;
+    }
+    return EXIT_SUCCESS;
+}
 
 
 
