@@ -1,7 +1,7 @@
 # Compile settings
 CC=gcc
-CFLAGS=-Wall -pthread -lm
-LFLAGS=-pthread -lm
+CFLAGS=-Wall -pthread
+LFLAGS=-pthread
 
 # Sources
 SRC:=src
