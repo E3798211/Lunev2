@@ -12,7 +12,6 @@
 #include <errno.h>
 #include <pthread.h>
 #include <assert.h>
-#include <math.h>
 #include "service.h"
 #include "system.h"
 

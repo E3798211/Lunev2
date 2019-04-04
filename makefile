@@ -1,6 +1,6 @@
 # Compile settings
 CC=gcc
-CFLAGS=-Wall -pthread
+CFLAGS=-Wall -pthread -std=c99
 LFLAGS=-pthread
 
 # Sources

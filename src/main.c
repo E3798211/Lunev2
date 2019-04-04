@@ -9,7 +9,6 @@
 #include <errno.h>
 #include <pthread.h>
 #include <assert.h>
-#include <math.h>
 #include "service.h"
 #include "system.h"
 #include "multithreading.h"
@@ -43,19 +42,23 @@ int main(int argc, char** argv)
         return EXIT_FAILURE;
     }
    
+    size_t n_thread_args = 
+        ((n_threads < sys.n_proc_onln)? sys.n_proc_onln : n_threads);
+    DBG printf("Creating  args:\t\t%4lu\n", n_thread_args);
+
     errno = 0;
     struct arg_t* thread_args = 
-        aligned_alloc(sys.cache_line, sys.cache_line * (n_threads + 1));
+        aligned_alloc(sys.cache_line, sys.cache_line * n_thread_args);
     if (!thread_args)
     {
         perror("posix_memalign()");
         return EXIT_FAILURE;
     }
     DBG printf("Allocated %lu bytes each %lu bytes aligned to %p\n\n",
-               sys.cache_line*(n_threads + 1), sizeof(struct arg_t), thread_args);
-    pthread_t tids[n_threads];
+               sys.cache_line * n_thread_args, sizeof(struct arg_t), 
+               thread_args);
+    pthread_t tids[((n_threads < sys.n_proc_onln)? sys.n_proc_onln : n_threads)];
 
-    // Strating threads
     DBG printf("Starting threads\n");
     if (start_threads(&sys, n_threads, tids, thread_args))
     {
@@ -65,6 +68,7 @@ int main(int argc, char** argv)
     
     DBG printf("Joining threads\n");
     double sum = 0;
+//  if (join_threads(&sys, n_threads, tids, thread_args, &sum))
     if (join_threads(&sys, n_threads, tids, thread_args, &sum))
     {
         printf("join_threads() failed\n");
@@ -74,6 +78,7 @@ int main(int argc, char** argv)
     printf("%lg\n", sum);
 
     delete_config(&sys);
+    free(thread_args);
 
     return 0;
 }
