@@ -57,7 +57,9 @@ int main(int argc, char** argv)
     DBG printf("Allocated %lu bytes each %lu bytes aligned to %p\n\n",
                sys.cache_line * n_thread_args, sizeof(struct arg_t), 
                thread_args);
-    pthread_t tids[((n_threads < sys.n_proc_onln)? sys.n_proc_onln : n_threads)];
+    
+    pthread_t tids[((n_threads < sys.n_proc_onln)? 
+                     sys.n_proc_onln : n_threads)];
 
     DBG printf("Starting threads\n");
     if (start_threads(&sys, n_threads, tids, thread_args))
@@ -68,7 +70,6 @@ int main(int argc, char** argv)
     
     DBG printf("Joining threads\n");
     double sum = 0;
-//  if (join_threads(&sys, n_threads, tids, thread_args, &sum))
     if (join_threads(&sys, n_threads, tids, thread_args, &sum))
     {
         printf("join_threads() failed\n");
@@ -76,6 +77,7 @@ int main(int argc, char** argv)
     }
 
     printf("%lg\n", sum);
+
 
     delete_config(&sys);
     free(thread_args);
