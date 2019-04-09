@@ -22,8 +22,11 @@
 #endif
 
 #define f(x) ((x)*(x))
-#define LEFT_BOUND   -25.0
-#define RIGHT_BOUND   25.0
+// #define LEFT_BOUND   -25.0
+// #define RIGHT_BOUND   25.0
+// #define INTEGRAL_STEP 0.00000001
+#define LEFT_BOUND   -40.0
+#define RIGHT_BOUND   40.0
 #define INTEGRAL_STEP 0.00000001
 
 struct arg_t
