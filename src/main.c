@@ -61,13 +61,19 @@ int main(int argc, char** argv)
     pthread_t tids[((n_threads < sys.n_proc_onln)? 
                      sys.n_proc_onln : n_threads)];
 
+
+    for(int i = 0; i < sys.n_proc_conf; i++)
+        printf("%2d: %d\n", i, sys.cpus[i].number);
+
+
+
     DBG printf("Starting threads\n");
     if (start_threads(&sys, n_threads, tids, thread_args))
     {
         printf("start_threads() failed\n");
         return EXIT_FAILURE;
     }
-    
+
     DBG printf("Joining threads\n");
     double sum = 0;
     if (join_threads(&sys, n_threads, tids, thread_args, &sum))

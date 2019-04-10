@@ -75,6 +75,14 @@ int get_system_config(struct sysconfig_t* const sys)
         return EXIT_FAILURE;
     }
     DBG printf("cache line length:\t%4lu\n", sys->cache_line);
+
+
+
+    // Temporary measures
+    sys->cache_line = 1024;
+
+
+
     
     errno = 0;
     sys->n_proc_conf = sysconf(_SC_NPROCESSORS_CONF);
