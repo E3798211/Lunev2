@@ -79,7 +79,7 @@ int get_system_config(struct sysconfig_t* const sys)
 
 
     // Temporary measures
-    sys->cache_line = 1024;
+    // sys->cache_line = 1024;
 
 
 

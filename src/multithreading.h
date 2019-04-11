@@ -25,8 +25,8 @@
 // #define LEFT_BOUND   -25.0
 // #define RIGHT_BOUND   25.0
 // #define INTEGRAL_STEP 0.00000001
-#define LEFT_BOUND   -70.0
-#define RIGHT_BOUND   70.0
+#define LEFT_BOUND   -100.0
+#define RIGHT_BOUND   100.0
 #define INTEGRAL_STEP 0.00000001
 
 struct arg_t
@@ -34,7 +34,8 @@ struct arg_t
     double left;
     double right;
     double sum;
-    char   fill[1024 - 3*sizeof(double)];
+//    char   fill[32*1024 - 3*sizeof(double)];
+    double fill[5];
 };
 
 void* routine(void* arg);

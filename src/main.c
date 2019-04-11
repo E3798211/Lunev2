@@ -49,6 +49,7 @@ int main(int argc, char** argv)
     errno = 0;
     struct arg_t* thread_args = 
         aligned_alloc(sys.cache_line, sys.cache_line * n_thread_args);
+//        aligned_alloc(4096, 32*1024 * n_thread_args);
     if (!thread_args)
     {
         perror("posix_memalign()");
@@ -60,12 +61,6 @@ int main(int argc, char** argv)
     
     pthread_t tids[((n_threads < sys.n_proc_onln)? 
                      sys.n_proc_onln : n_threads)];
-
-
-    for(int i = 0; i < sys.n_proc_conf; i++)
-        printf("%2d: %d\n", i, sys.cpus[i].number);
-
-
 
     DBG printf("Starting threads\n");
     if (start_threads(&sys, n_threads, tids, thread_args))

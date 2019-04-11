@@ -24,7 +24,10 @@ int read_value(const char* const filename, const char* const fmt,
     }
 
     errno = 0;
-    fscanf(fin, fmt, value);
+    if (!fscanf(fin, fmt, value))
+    {
+        printf("fscanf() failed\n");
+    }
     int status = errno;
     
     fclose(fin);

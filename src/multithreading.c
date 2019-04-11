@@ -3,27 +3,61 @@
 
 void* routine(void* arg)
 {
-    register struct arg_t* bounds = (struct arg_t*)arg;
-    register double left  = bounds->left;
-    register double right = bounds->right;
-    register double sum = 0;
-    for(register double i = left; i < right; i += INTEGRAL_STEP)
+    struct arg_t* bounds = (struct arg_t*)arg;
+    double left  = bounds->left;
+    double right = bounds->right;
+    double sum = 0;
+    for(double i = left; i < right; i += INTEGRAL_STEP)
         sum += INTEGRAL_STEP*f(i);
 
     bounds->sum = sum;
-
-    pthread_exit(NULL);
-
+ 
     return NULL;
 }
 
-static void init_thread_args(struct arg_t args[], size_t n_args, double step)
+/*
+    threads_per_cpu expected to be of sys->n_proc_onln size
+ */
+static void distribute_threads(int threads_per_cpu[], size_t n_threads,
+                               struct sysconfig_t* sys)
+{ 
+    const int n_threads_per_cpu = n_threads / sys->n_proc_onln;
+    int extra_threads = n_threads % sys->n_proc_onln;
+    
+    for(int i = 0; i < sys->n_proc_onln; i++)
+        threads_per_cpu[i] = n_threads_per_cpu;
+    for(int i = sys->n_proc_onln - 1; extra_threads--; i--)
+        threads_per_cpu[i]++;
+}
+
+static void init_thread_args(struct arg_t args[], size_t n_threads,
+                             double left_bound, double right_bound,
+                             struct sysconfig_t* sys)
 {
-    for(size_t i = 0; i < n_args; i++)
+    const double average_load  = (right_bound - left_bound) / sys->n_proc_onln;
+    
+    int threads_per_cpu[sys->n_proc_onln];
+    distribute_threads(threads_per_cpu, n_threads, sys);
+
+    double current = left_bound;
+    int cur_cpu = 0;
+    int threads_left = threads_per_cpu[0];
+    for(size_t i = 0; i < n_threads; i++)
     {
-        args[i].left  = LEFT_BOUND + step * i;
-        args[i].right = LEFT_BOUND + step * (i + 1);
+        if (!threads_left)
+            threads_left = threads_per_cpu[++cur_cpu];
+        threads_left--;
+
+        double step = average_load/threads_per_cpu[cur_cpu];
+
+        args[i].left  = current;
+        args[i].right = current + step;
+
+        current += step;
     }
+
+    for(int i = 0; i < n_threads; i++)
+        DBG printf("args[%2d] = %lg\n", i, args[i].right - args[i].left);
 }
 
 static int set_thread_affinity(pthread_attr_t* attr, int cpu_num)
@@ -39,7 +73,7 @@ static int set_thread_affinity(pthread_attr_t* attr, int cpu_num)
 
     CPU_ZERO(&cpuset);
     CPU_SET(cpu_num, &cpuset);
-    
+ 
     errno = 0;
     if (pthread_attr_setaffinity_np(attr, sizeof(cpuset), &cpuset))
     {
@@ -50,12 +84,24 @@ static int set_thread_affinity(pthread_attr_t* attr, int cpu_num)
     return EXIT_SUCCESS;
 }
 
+
 static int start_idle_threads(struct sysconfig_t* sys, size_t n_threads, 
                         pthread_t tids[], struct arg_t args[])
 { 
-    const double step = (RIGHT_BOUND - LEFT_BOUND) / n_threads;
-    
-    init_thread_args(args, sys->n_proc_onln, step);
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(sys->cpus[0].number, &cpuset);
+ 
+    errno = 0;
+    if (sched_setaffinity(getpid(), sizeof(cpuset), &cpuset))
+    {
+        perror("sched_setaffinity()");
+        return EXIT_FAILURE;
+    }
+
+    double thread_load = (RIGHT_BOUND - LEFT_BOUND) / n_threads;
+    init_thread_args(args, sys->n_proc_onln, 
+    LEFT_BOUND, LEFT_BOUND + thread_load*sys->n_proc_onln, sys);
 
     pthread_attr_t attrs[sys->n_proc_onln];
     for(size_t i = 0; i < sys->n_proc_onln; i++)
@@ -75,6 +121,54 @@ static int start_idle_threads(struct sysconfig_t* sys, size_t n_threads,
         }
     }
     
+    tids[0] = pthread_self();
+    routine(&args[0]);
+
+    return EXIT_SUCCESS;
+}
+
+static int start_useful_threads(struct sysconfig_t* sys, size_t n_threads, 
+                        pthread_t tids[], struct arg_t args[])
+{
+    DBG printf("Threads per cpu: %2lu\nextra threads  : %2lu\n",
+                n_threads / sys->n_proc_onln, 
+                n_threads % sys->n_proc_onln);
+
+    init_thread_args(args, n_threads, LEFT_BOUND, RIGHT_BOUND, sys);
+
+    int threads_per_cpu[sys->n_proc_onln];
+    distribute_threads(threads_per_cpu, n_threads, sys);
+
+    for(int i = 0; i < sys->n_proc_onln; i++)
+        DBG printf("load[%2d] = %2d\n", i, threads_per_cpu[i]);
+
+    pthread_attr_t attrs[n_threads];
+    int cur_cpu = 0;
+    int threads_left = threads_per_cpu[0];
+    for(size_t i = 0; i < n_threads; i++)
+    {
+        if (!threads_left)
+            threads_left = threads_per_cpu[++cur_cpu];
+        threads_left--;
+
+        if (set_thread_affinity(&attrs[i], cur_cpu))
+        {
+            printf("set_thread_affinity() failed\n");
+            return EXIT_FAILURE;
+        }
+    }
+
+    for(size_t i = 1; i < n_threads; i++)
+    {
+        errno = 0;
+        if (pthread_create(&tids[i], &attrs[i], routine, &args[i]))
+        {
+            perror("pthread_create()");
+            return EXIT_FAILURE;
+        }
+        DBG printf("Created %2lu'th thread\n", i);
+    }
+    
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
     CPU_SET(sys->cpus[0].number, &cpuset);
@@ -85,276 +179,21 @@ static int start_idle_threads(struct sysconfig_t* sys, size_t n_threads,
         perror("pthread_attr_setaffinity_np");
         return EXIT_FAILURE;
     }
-
+    
     tids[0] = pthread_self();
     routine(&args[0]);
-
-    return EXIT_SUCCESS;
-}
-
-static int start_useful_threads(struct sysconfig_t* sys, size_t n_threads, 
-                        pthread_t tids[], struct arg_t args[])
-{
-    const double step = (RIGHT_BOUND - LEFT_BOUND) / n_threads;
-
-    const int n_threads_per_cpu = n_threads / sys->n_proc_onln;
-    const int extra_threads     = n_threads % sys->n_proc_onln;
-
+    printf("done\n");
+    
     return EXIT_SUCCESS;
 }
 
 int start_threads(struct sysconfig_t* sys, size_t n_threads, 
                         pthread_t tids[], struct arg_t args[])
 {
-    const double step = (RIGHT_BOUND - LEFT_BOUND) / n_threads;
-/*
-    if (n_threads < sys->n_proc_onln)
-    {
-        // Setting first thread to the 0-th core
-        cpu_set_t cpuset;
-        CPU_ZERO(&cpuset);
-        CPU_SET(sys->cpus[0].number, &cpuset);
-            
-        errno = 0;
-        if (pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset))
-        {
-            perror("pthread_setaffinity_np()");
-            return EXIT_FAILURE;
-        }
-    
-        pthread_attr_t attr;
-        errno = 0;
-        if (pthread_attr_init(&attr))
-        {
-            perror("pthread_attr_init()");
-            return EXIT_FAILURE;
-        }
-
-        for(size_t i = 0; i < sys->n_proc_onln - 1; i++)
-        {
-            CPU_ZERO(&cpuset);
-            CPU_SET(sys->cpus[(i + 1) % sys->n_proc_onln].number, &cpuset);    // CPU0 for main thread
-    
-            args[i].left  = LEFT_BOUND + step * i;
-            args[i].right = LEFT_BOUND + step * (i + 1);
-    
-            errno = 0;
-            if (pthread_attr_setaffinity_np(&attr, sizeof(cpu_set_t), &cpuset))
-            {
-                perror("pthread_attr_setaffinity_np()");
-                return EXIT_FAILURE;
-            }
-    
-            errno = 0;
-            if (pthread_create(&tids[i], &attr, routine, &args[i]))
-            {
-                perror("pthread_create()");
-                printf("Failed to create %lu'th thread\n", i);
-                return EXIT_FAILURE;
-            }
-            DBG printf("Created %lu'th thread on %d'th proc\n",
-                        i, sys->cpus[(i + 1) % sys->n_proc_onln].number);
-        }
-    }
+    if (n_threads <= sys->n_proc_onln)
+        return start_idle_threads(sys, n_threads, tids, args);
     else
-    {
-        for(size_t i = 0; i < n_threads; i++)
-        {
-            DBG printf("Starting %lu'th thread\n", i);
-            
-            args[i].left  = LEFT_BOUND + step * i;
-            args[i].right = LEFT_BOUND + step * (i + 1);
-    
-            errno = 0;
-            if (pthread_create(&tids[i], NULL, routine, &args[i]))
-            {
-                perror("pthread_create()");
-                printf("Failed to create %lu'th thread\n", i);
-                return EXIT_FAILURE;
-            }
-        }
-        DBG printf("Scheduler invoked\n");
-    }
-*/
-/*
-    cpu_set_t cpuset;
-    pthread_attr_t attr;
-    errno = 0;
-    if (pthread_attr_init(&attr))
-    {
-        perror("pthread_attr_init()");
-        return EXIT_FAILURE;
-    }
-
-    size_t n_real_threads = 
-        ((n_threads < sys->n_proc_onln)? sys->n_proc_onln - 1 : n_threads - 1);
-
-    for(size_t i = 0; i < n_real_threads + 1; i++)
-    {
-        args[i].left  = LEFT_BOUND + step * i;
-        args[i].right = LEFT_BOUND + step * (i + 1);
-    }
-
-    // Placing threads
-    const size_t threads_per_cpu = n_real_threads/sys->n_proc_onln;
-    size_t       extra_threads   = n_real_threads%sys->n_proc_onln;
-
-    int cpus = sys->n_proc_onln;
-    int threads_left[cpus];
-    for(size_t i = 0; i < cpus; i++)
-        threads_left[i] = threads_per_cpu;
-    while(extra_threads--)
-    {
-        threads_left[cpus - 1]++;
-        cpus--;
-    }
-
-    DBG
-    {
-        for(int i = 0; i < sys->n_proc_onln; i++)
-            printf("CPU%d -> %d\n", i, threads_left[i]);
-    }
-
-    // size_t current_cpu = sys->n_proc_onln - 1;
-    size_t current_cpu = 0;
-    for(size_t i = 0; i < n_real_threads; i++)
-    {
-        CPU_ZERO(&cpuset);
-        
-        if (threads_left[current_cpu])      threads_left[current_cpu]--;
-        else
-        {
-            current_cpu++;
-            threads_left[current_cpu]--;
-        }
-        CPU_SET(sys->cpus[current_cpu].number, &cpuset);
-
-        // CPU_SET(sys->cpus[(sys->n_proc_onln - i - 1) % sys->n_proc_onln].number, &cpuset);    // CPU0 for main thread
-
-        errno = 0;
-        if (pthread_attr_setaffinity_np(&attr, sizeof(cpu_set_t), &cpuset))
-        {
-            perror("pthread_attr_setaffinity_np()");
-            return EXIT_FAILURE;
-        }
-
-        errno = 0;
-        if (pthread_create(&tids[i], &attr, routine, &args[i]))
-        {
-            perror("pthread_create()");
-            printf("Failed to create %lu'th thread\n", i);
-            return EXIT_FAILURE;
-        }
-        DBG printf("Created %lu'th thread on %d'th proc\n",
-                    i, sys->cpus[current_cpu].number);
-    }
-
-    // Setting first thread to the 0-th core
-    CPU_ZERO(&cpuset);
-    CPU_SET(sys->cpus[0].number, &cpuset);
-        
-    errno = 0;
-    if (pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset))
-    {
-        perror("pthread_setaffinity_np()");
-        return EXIT_FAILURE;
-    }
-    routine(&args[n_real_threads]);
-*/
-
-    size_t n_real_threads = 
-        ((n_threads < sys->n_proc_onln)? sys->n_proc_onln - 1 : n_threads - 1);
-
-
-    return start_idle_threads(sys, n_threads, tids, args);
-
-    int n_threads_per_cpu = n_real_threads/sys->n_proc_onln;
-    int extra_threads     = n_real_threads%sys->n_proc_onln;
-
-    int load[sys->n_proc_onln];
-    for(size_t i = 0; i < sys->n_proc_onln; i++)
-        load[i] = n_threads_per_cpu;
-    for(size_t i = 0; i < extra_threads; i++)
-        load[sys->n_proc_onln - i - 1]++;
-
-    cpu_set_t cpuset;
-    pthread_attr_t attrs[sys->n_proc_onln];
-    for(size_t i = 0; i < sys->n_proc_onln; i++)
-    {
-        errno = 0;
-        if (pthread_attr_init(&attrs[i]))
-        {
-            perror("pthread_attr_init()");
-            return EXIT_FAILURE;
-        }
-    }
-
-    for(size_t i = 0; i < n_real_threads + 1; i++)
-    {
-        args[i].left  = LEFT_BOUND + step *  i;
-        args[i].right = LEFT_BOUND + step * (i + 1);
-    }
-
-    size_t current_cpu = sys->n_proc_onln - 1;
-    for (size_t i = 0; i < n_real_threads; i++)
-    {
-        CPU_ZERO(&cpuset);
-        
-        if (load[current_cpu] > 0)  
-            load[current_cpu]--;
-        else
-        {
-            current_cpu--;
-            load[current_cpu]--;
-        }
-        
-        CPU_SET(sys->cpus[current_cpu].number, &cpuset);
-
-
-
-        
-        printf("%d\n", CPU_COUNT(&cpuset));
-
-
-
-
-
-        errno = 0;
-        if (pthread_attr_setaffinity_np(&attrs[i], sizeof(cpu_set_t), &cpuset))
-        {
-            perror("pthread_attr_setaffinity_np()");
-            return EXIT_FAILURE;
-        }
-
-        errno = 0;
-        if (pthread_create(&tids[i], &attrs[i], routine, &args[i]))
-        {
-            perror("pthread_create()");
-            printf("Failed to create %lu'th thread\n", i);
-            return EXIT_FAILURE;
-        }
-        DBG printf("Created %lu'th thread on %d'th proc\n",
-                    i, sys->cpus[current_cpu].number);
-    }
-
-    CPU_ZERO(&cpuset);
-    CPU_SET(sys->cpus[0].number, &cpuset);
-        
-    errno = 0;
-    if (pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset))
-    {
-        perror("pthread_setaffinity_np()");
-        return EXIT_FAILURE;
-    }
-    
-    DBG printf("Creating main thread on %d'th proc\n",
-                sys->cpus[0].number);
-    routine(&args[n_real_threads]);
-
-    for(size_t i = 0; i < sys->n_proc_onln; i++)
-        pthread_attr_destroy(&attrs[i]);
-
-    return EXIT_SUCCESS;
+        return start_useful_threads(sys, n_threads, tids, args);
 }
 
 
@@ -363,46 +202,7 @@ int join_threads (struct sysconfig_t* sys, size_t n_threads,
                          pthread_t tids[], struct arg_t args[], double* sum)
 {
     *sum = 0;
-/*
-    if (n_threads < sys->n_proc_onln)
-    {
-        for(size_t i = 0; i < sys->n_proc_onln - 1; i++)
-        {
-            DBG printf("Joining %lu'th thread\n", i);
-            errno = 0;
-            if (pthread_join(tids[i], NULL))
-            {
-                perror("pthread_join()");
-                printf("Failed to join %lu'th thread\n", i);
-                return EXIT_FAILURE;
-            }
-            
-            if (i < n_threads)
-                *sum += args[i].sum;
-        }
-    }
-    else
-    {
-        for(size_t i = 0; i < n_threads; i++)
-        {
-            DBG printf("Joining %lu'th thread\n", i);
-            errno = 0;
-            if (pthread_join(tids[i], NULL))
-            {
-                perror("pthread_join()");
-                printf("Failed to join %lu'th thread\n", i);
-                return EXIT_FAILURE;
-            }
-            *sum += args[i].sum;
-        }
-    }
-*/
-
-    size_t n_real_threads = 
-        ((n_threads < sys->n_proc_onln)? sys->n_proc_onln - 1 : n_threads - 1);
-
-//    for(size_t i = 0; i < n_real_threads; i++)
-    for(size_t i = 0; i < n_threads; i++)
+    for(size_t i = 1; i < n_threads; i++)
     {
         DBG printf("Joining %lu'th thread\n", i);
         errno = 0;
@@ -412,10 +212,9 @@ int join_threads (struct sysconfig_t* sys, size_t n_threads,
             printf("Failed to join %lu'th thread\n", i);
             return EXIT_FAILURE;
         }
-        
-        if (i < n_threads)
-            *sum += args[i].sum;
+        *sum += args[i].sum;
     }
+
     *sum += args[0].sum;
 
     return EXIT_SUCCESS;
