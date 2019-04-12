@@ -88,18 +88,6 @@ static int set_thread_affinity(pthread_attr_t* attr, int cpu_num)
 static int start_idle_threads(struct sysconfig_t* sys, size_t n_threads, 
                         pthread_t tids[], struct arg_t args[])
 { 
-/*
-    cpu_set_t cpuset;
-    CPU_ZERO(&cpuset);
-    CPU_SET(sys->cpus[0].number, &cpuset);
- 
-    errno = 0;
-    if (sched_setaffinity(getpid(), sizeof(cpuset), &cpuset))
-    {
-        perror("sched_setaffinity()");
-        return EXIT_FAILURE;
-    }
-*/
     double thread_load = (RIGHT_BOUND - LEFT_BOUND) / n_threads;
     init_thread_args(args, sys->n_proc_onln, 
     LEFT_BOUND, LEFT_BOUND + thread_load*sys->n_proc_onln, sys);
@@ -136,10 +124,7 @@ static int start_idle_threads(struct sysconfig_t* sys, size_t n_threads,
     
     tids[0] = pthread_self();
     routine(&args[0]);
-/* 
-    tids[0] = pthread_self();
-    routine(&args[0]);
-*/
+    
     return EXIT_SUCCESS;
 }
 
@@ -198,7 +183,6 @@ static int start_useful_threads(struct sysconfig_t* sys, size_t n_threads,
     
     tids[0] = pthread_self();
     routine(&args[0]);
-//    printf("done\n");
     
     return EXIT_SUCCESS;
 }
@@ -218,7 +202,9 @@ int join_threads (struct sysconfig_t* sys, size_t n_threads,
                          pthread_t tids[], struct arg_t args[], double* sum)
 {
     *sum = 0;
-    for(size_t i = 1; i < n_threads; i++)
+    size_t n_real_threads = 
+        ((n_threads <= sys->n_proc_onln)? sys->n_proc_onln : n_threads);
+    for(size_t i = 1; i < n_real_threads; i++)
     {
         DBG printf("Joining %lu'th thread\n", i);
         errno = 0;
@@ -228,9 +214,9 @@ int join_threads (struct sysconfig_t* sys, size_t n_threads,
             printf("Failed to join %lu'th thread\n", i);
             return EXIT_FAILURE;
         }
-        *sum += args[i].sum;
+        if (i < n_threads)
+            *sum += args[i].sum;
     }
-
     *sum += args[0].sum;
 
     return EXIT_SUCCESS;
