@@ -3,11 +3,11 @@
 
 void* routine(void* arg)
 {
-    struct arg_t* bounds = (struct arg_t*)arg;
-    double left  = bounds->left;
-    double right = bounds->right;
-    double sum = 0;
-    for(double i = left; i < right; i += INTEGRAL_STEP)
+    register struct arg_t* bounds = (struct arg_t*)arg;
+    register double left  = bounds->left;
+    register double right = bounds->right;
+    register double sum = 0;
+    for(register double i = left; i < right; i += INTEGRAL_STEP)
         sum += INTEGRAL_STEP*f(i);
 
     bounds->sum = sum;
@@ -88,6 +88,7 @@ static int set_thread_affinity(pthread_attr_t* attr, int cpu_num)
 static int start_idle_threads(struct sysconfig_t* sys, size_t n_threads, 
                         pthread_t tids[], struct arg_t args[])
 { 
+/*
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
     CPU_SET(sys->cpus[0].number, &cpuset);
@@ -98,7 +99,7 @@ static int start_idle_threads(struct sysconfig_t* sys, size_t n_threads,
         perror("sched_setaffinity()");
         return EXIT_FAILURE;
     }
-
+*/
     double thread_load = (RIGHT_BOUND - LEFT_BOUND) / n_threads;
     init_thread_args(args, sys->n_proc_onln, 
     LEFT_BOUND, LEFT_BOUND + thread_load*sys->n_proc_onln, sys);
@@ -120,10 +121,25 @@ static int start_idle_threads(struct sysconfig_t* sys, size_t n_threads,
             return EXIT_FAILURE;
         }
     }
+
+
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(sys->cpus[0].number, &cpuset);
+ 
+    errno = 0;
+    if (pthread_setaffinity_np(pthread_self(), sizeof(cpuset), &cpuset))
+    {
+        perror("pthread_attr_setaffinity_np");
+        return EXIT_FAILURE;
+    }
     
     tids[0] = pthread_self();
     routine(&args[0]);
-
+/* 
+    tids[0] = pthread_self();
+    routine(&args[0]);
+*/
     return EXIT_SUCCESS;
 }
 
@@ -182,7 +198,7 @@ static int start_useful_threads(struct sysconfig_t* sys, size_t n_threads,
     
     tids[0] = pthread_self();
     routine(&args[0]);
-    printf("done\n");
+//    printf("done\n");
     
     return EXIT_SUCCESS;
 }
